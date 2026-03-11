@@ -25,7 +25,7 @@ SECRET_KEY = 'django-insecure-c@f^1hu-whjoo+5ls%f#s5rmm4y1gkov0@1@=^g#nuk%a5ea=_
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
 
-ALLOWED_HOSTS = []
+ALLOWED_HOSTS = ["localhost", "127.0.0.1", "victus"]
 
 
 # Application definition
@@ -43,6 +43,10 @@ INSTALLED_APPS = [
     'apps.manufacturing',
     'apps.simulations',
     'apps.analytics',
+    'apps.users',
+    'apps.rmct',
+    'corsheaders',
+    'rest_framework',
 
 ]
 
@@ -54,6 +58,8 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    'corsheaders.middleware.CorsMiddleware',
+    'apps.auth.middleware.api_auth.ApiAuthMiddleware',
 ]
 
 ROOT_URLCONF = 'RMCT.urls'
@@ -121,6 +127,30 @@ TIME_ZONE = 'UTC'
 USE_I18N = True
 
 USE_TZ = True
+
+
+CORS_ALLOW_CREDENTIALS = True
+
+CORS_ALLOWED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:8000",
+]
+
+CSRF_TRUSTED_ORIGINS = [
+    "http://localhost:3000",
+    "http://127.0.0.1:8000",
+]
+
+# Session cookie (auth): HttpOnly, sent with every request
+SESSION_ENGINE = "django.contrib.sessions.backends.db"
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = "Lax"
+SESSION_COOKIE_AGE = 1209600  # 2 weeks
+
+# CSRF cookie: readable by JS so we can send X-CSRFToken header
+CSRF_COOKIE_HTTPONLY = False
+CSRF_COOKIE_SAMESITE = "Lax"
+CSRF_USE_SESSIONS = False
 
 
 # Static files (CSS, JavaScript, Images)
