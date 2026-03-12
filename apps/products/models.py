@@ -1,6 +1,6 @@
 import uuid
 from django.db import models
-from organizations.models import Organization
+from apps.organizations.models import Organization
 
 
 class Product(models.Model):

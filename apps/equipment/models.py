@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
-from organizations.models import Organization
-from labor.models import Labor
+from apps.organizations.models import Organization
+from apps.labor.models import Labor
 
 
 class EquipmentGroup(models.Model):

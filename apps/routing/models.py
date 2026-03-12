@@ -1,8 +1,8 @@
 import uuid
 from django.db import models
-from organizations.models import Organization
-from products.models import Product
-from operations.models import Operation
+from apps.organizations.models import Organization
+from apps.products.models import Product
+from apps.operations.models import Operation
 
 
 class Routing(models.Model):
