@@ -47,6 +47,15 @@ INSTALLED_APPS = [
     'apps.rmct',
     'corsheaders',
     'rest_framework',
+    'apps.organizations',
+    'apps.labor',
+    'apps.products', 
+    'apps.routing',
+    'apps.operations',
+    'apps.equipment',
+    'apps.auth',
+    'apps.ibom',
+    "corsheaders",
 
 ]
 
@@ -91,7 +100,7 @@ DATABASES = {
    'ENGINE': 'django.db.backends.postgresql',
    'NAME': 'RMCT',
    'USER': 'postgres',
-   'PASSWORD': 'Neer@j9511',
+   'PASSWORD': 'Saivarun1234',
    'HOST': 'localhost',
    'PORT': '5432',
  }
