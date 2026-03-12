@@ -47,7 +47,14 @@ INSTALLED_APPS = [
     'apps.rmct',
     'corsheaders',
     'rest_framework',
-
+    'apps.organizations',
+    'apps.auth',
+    'apps.routing',
+    'apps.ibom',
+    'apps.operations',
+    'apps.products',
+    'apps.equipment',
+    'apps.labor',
 ]
 
 MIDDLEWARE = [

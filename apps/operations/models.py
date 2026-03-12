@@ -1,9 +1,9 @@
 import uuid
 from django.db import models
-from organizations.models import Organization
-from products.models import Product
-from equipment.models import EquipmentGroup
-from labor.models import Labor
+from apps.organizations.models import Organization
+from apps.products.models import Product
+from apps.equipment.models import EquipmentGroup
+from apps.labor.models import Labor
 
 
 class Operation(models.Model):

@@ -1,7 +1,7 @@
 import uuid
 from django.db import models
-from organizations.models import Organization
-from products.models import Product
+from apps.organizations.models import Organization
+from apps.products.models import Product
 
 
 class BOM(models.Model):

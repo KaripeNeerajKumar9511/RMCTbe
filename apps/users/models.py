@@ -1,7 +1,7 @@
 from django.db import models
 from django.contrib.auth.models import User
 from django.contrib.auth import authenticate
-from organizations.models import Organization
+from apps.organizations.models import Organization
 
 
 class UserProfile(models.Model):
