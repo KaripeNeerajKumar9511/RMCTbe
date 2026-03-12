@@ -10,6 +10,14 @@ from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.csrf import ensure_csrf_cookie
 from django.shortcuts import get_object_or_404
 
+from apps.generaldata.models import GeneralData
+from apps.labor.models import Labor
+from apps.equipment.models import EquipmentGroup
+from apps.products.models import Product
+from apps.operations.models import Operation
+from apps.routing.models import Routing
+from apps.ibom.models import BOM
+
 from .models import RMCMModel, ModelVersion, Scenario, ScenarioChange, ScenarioResult
 
 
@@ -18,6 +26,275 @@ def _parse_json(request):
         return json.loads(request.body) if request.body else {}
     except json.JSONDecodeError:
         return None
+
+
+def _serialize_general(m: RMCMModel) -> dict:
+    """
+    Build GeneralData payload for a model.
+
+    Prefers the dedicated GeneralData table (apps.generaldata) and falls back to
+    the legacy JSON field on RMCMModel if no relational row exists.
+    """
+    try:
+        gd = m.general_settings  # OneToOneField related_name on GeneralData
+    except GeneralData.DoesNotExist:
+        return m.general or {}
+
+    return {
+        'model_title': gd.model_title or '',
+        'author': gd.author or '',
+        'comments': gd.comments or '',
+        'ops_time_unit': gd.ops_time_unit,
+        'mct_time_unit': gd.mct_time_unit,
+        'prod_period_unit': gd.prod_period_unit,
+        'conv1': gd.conv1,
+        'conv2': gd.conv2,
+        'util_limit': gd.util_limit,
+        'var_equip': gd.var_equip,
+        'var_labor': gd.var_labor,
+        'var_prod': gd.var_prod,
+        'gen1': gd.gen1,
+        'gen2': gd.gen2,
+        'gen3': gd.gen3,
+        'gen4': gd.gen4,
+    }
+
+
+def _labor_for_model(m: RMCMModel):
+    """
+    Build LaborGroup[] payload for a model from the dedicated Labor table.
+
+    Uses the owner's organization (via UserProfile) when available.
+    Falls back to the legacy JSON field if no organization is found.
+    """
+    owner = m.owner
+    org = None
+    if owner is not None and hasattr(owner, "profile"):
+        org = getattr(owner.profile, "organization", None)
+
+    if org is None:
+        # No organization context; use legacy JSON field.
+        return m.labor or []
+
+    labors = Labor.objects.filter(
+        organization=org,
+        deleted_at__isnull=True,
+    ).order_by("created_at")
+
+    payload = []
+    for labor in labors:
+        payload.append({
+            'id': str(labor.id),
+            'name': labor.name,
+            'count': labor.count,
+            'overtime_pct': labor.overtime_percent,
+            'unavail_pct': labor.unavailability_percent,
+            'dept_code': labor.department or '',
+            'prioritize_use': labor.prioritize,
+            'setup_factor': labor.setup_factor,
+            'run_factor': labor.run_factor,
+            'var_factor': labor.variable_factor,
+            'lab1': labor.lab1 or 0.0,
+            'lab2': labor.lab2 or 0.0,
+            'lab3': labor.lab3 or 0.0,
+            'lab4': labor.lab4 or 0.0,
+            'comments': labor.notes or '',
+        })
+    return payload
+
+
+def _equipment_for_model(m: RMCMModel):
+    """
+    Build EquipmentGroup[] payload for a model from the dedicated equipment table.
+
+    Uses the owner's organization when available, otherwise falls back to the
+    legacy JSON field on RMCMModel.
+    """
+    owner = m.owner
+    org = None
+    if owner is not None and hasattr(owner, "profile"):
+        org = getattr(owner.profile, "organization", None)
+
+    if org is None:
+        return m.equipment or []
+
+    equipment_qs = EquipmentGroup.objects.filter(
+        organization=org,
+        deleted_at__isnull=True,
+    ).order_by("created_at")
+
+    payload = []
+    for eq in equipment_qs:
+        payload.append({
+            'id': str(eq.id),
+            'name': eq.name,
+            'equip_type': (eq.equipment_type or 'Standard').lower() == 'delay' and 'delay' or 'standard',
+            'count': eq.count,
+            'mttf': eq.mttf_minutes,
+            'mttr': eq.mttr_minutes,
+            'overtime_pct': eq.overtime_percent,
+            'labor_group_id': str(eq.labor_group_id) if eq.labor_group_id else '',
+            'dept_code': eq.department_area or '',
+            'out_of_area': bool(eq.out_of_area_equipment),
+            'unavail_pct': eq.percent_time_unavailable,
+            'setup_factor': eq.setup_factor,
+            'run_factor': eq.run_factor,
+            'var_factor': eq.variability_factor,
+            'eq1': eq.eq1,
+            'eq2': eq.eq2,
+            'eq3': eq.eq3,
+            'eq4': eq.eq4,
+            'comments': eq.comments or '',
+        })
+    return payload
+
+
+def _products_for_model(m: RMCMModel):
+    """
+    Build Product[] payload for a model from the dedicated products table.
+    """
+    owner = m.owner
+    org = None
+    if owner is not None and hasattr(owner, "profile"):
+        org = getattr(owner.profile, "organization", None)
+
+    if org is None:
+        return m.products or []
+
+    products_qs = Product.objects.filter(
+        organization=org,
+        deleted_at__isnull=True,
+    ).order_by("created_at")
+
+    payload = []
+    for p in products_qs:
+        payload.append({
+            'id': str(p.id),
+            'name': p.name,
+            'demand': p.end_demand,
+            'lot_size': p.lot_size,
+            'tbatch_size': p.transfer_batch,
+            'demand_factor': p.demand_factor,
+            'lot_factor': p.lot_factor,
+            'var_factor': p.variability_factor,
+            'setup_factor': 1.0,  # not present on Product model; keep default
+            'make_to_stock': p.make_to_stock,
+            'gather_tbatches': p.gather_transfer_batches,
+            'dept_code': p.department_area or '',
+            'prod1': p.prod1,
+            'prod2': p.prod2,
+            'prod3': p.prod3,
+            'prod4': p.prod4,
+            'comments': p.comments or '',
+        })
+    return payload
+
+
+def _operations_for_model(m: RMCMModel):
+    """
+    Build Operation[] payload for a model from the dedicated operations table.
+
+    The relational Operation model is a simplified representation. Fields that
+    do not exist on the model are surfaced as zeros to keep the frontend type
+    happy.
+    """
+    owner = m.owner
+    org = None
+    if owner is not None and hasattr(owner, "profile"):
+        org = getattr(owner.profile, "organization", None)
+
+    if org is None:
+        return m.operations or []
+
+    ops_qs = Operation.objects.filter(
+        organization=org,
+        deleted_at__isnull=True,
+    ).select_related("product", "equipment_group", "labor").order_by("product__created_at", "op_number")
+
+    payload = []
+    for op in ops_qs:
+        payload.append({
+            'id': str(op.id),
+            'product_id': str(op.product_id),
+            'op_name': op.name,
+            'op_number': op.op_number,
+            'equip_id': str(op.equipment_group_id) if op.equipment_group_id else '',
+            'pct_assigned': op.percent_assign,
+            'equip_setup_lot': op.equipment_setup_per_lot,
+            'equip_setup_piece': 0,
+            'equip_setup_tbatch': 0,
+            'equip_run_piece': op.equipment_run_per_piece,
+            'equip_run_lot': 0,
+            'equip_run_tbatch': 0,
+            'labor_setup_lot': op.labor_setup_per_lot,
+            'labor_setup_piece': 0,
+            'labor_setup_tbatch': 0,
+            'labor_run_piece': op.labor_run_per_piece,
+            'labor_run_lot': 0,
+            'labor_run_tbatch': 0,
+            'oper1': 0,
+            'oper2': 0,
+            'oper3': 0,
+            'oper4': 0,
+        })
+    return payload
+
+
+def _routing_for_model(m: RMCMModel):
+    """
+    Build RoutingEntry[] payload for a model from the dedicated routing table.
+    """
+    owner = m.owner
+    org = None
+    if owner is not None and hasattr(owner, "profile"):
+        org = getattr(owner.profile, "organization", None)
+
+    if org is None:
+        return m.routing or []
+
+    routing_qs = Routing.objects.filter(
+        organization=org,
+        deleted_at__isnull=True,
+    ).select_related("product", "from_operation", "to_operation").order_by("created_at")
+
+    payload = []
+    for r in routing_qs:
+        payload.append({
+            'id': str(r.id),
+            'product_id': str(r.product_id),
+            'from_op_name': r.from_operation.name,
+            'to_op_name': r.to_operation.name,
+            'pct_routed': r.probability,
+        })
+    return payload
+
+
+def _ibom_for_model(m: RMCMModel):
+    """
+    Build IBOMEntry[] payload for a model from the dedicated BOM table.
+    """
+    owner = m.owner
+    org = None
+    if owner is not None and hasattr(owner, "profile"):
+        org = getattr(owner.profile, "organization", None)
+
+    if org is None:
+        return m.ibom or []
+
+    bom_qs = BOM.objects.filter(
+        organization=org,
+        deleted_at__isnull=True,
+    ).order_by("created_at")
+
+    payload = []
+    for b in bom_qs:
+        payload.append({
+            'id': str(b.id),
+            'parent_product_id': str(b.parent_product_id),
+            'component_product_id': str(b.component_product_id),
+            'units_per_assy': b.quantity_per_assembly,
+        })
+    return payload
 
 
 def _model_to_payload(m: RMCMModel) -> dict:
@@ -34,14 +311,14 @@ def _model_to_payload(m: RMCMModel) -> dict:
         'is_archived': bool(m.is_archived),
         'is_demo': bool(m.is_demo),
         'is_starred': bool(m.is_starred),
-        'general': m.general or {},
+        'general': _serialize_general(m),
         'param_names': m.param_names or {},
-        'labor': m.labor or [],
-        'equipment': m.equipment or [],
-        'products': m.products or [],
-        'operations': m.operations or [],
-        'routing': m.routing or [],
-        'ibom': m.ibom or [],
+        'labor': _labor_for_model(m),
+        'equipment': _equipment_for_model(m),
+        'products': _products_for_model(m),
+        'operations': _operations_for_model(m),
+        'routing': _routing_for_model(m),
+        'ibom': _ibom_for_model(m),
     }
 
 
@@ -79,6 +356,7 @@ def model_detail(request, model_id):
     return JsonResponse(_model_to_payload(m))
 
 
+@csrf_exempt
 @require_http_methods(['POST', 'PUT'])
 def model_save(request, model_id=None):
     """
@@ -120,6 +398,7 @@ def model_save(request, model_id=None):
     return JsonResponse(_model_to_payload(obj), status=201 if created else 200)
 
 
+@csrf_exempt
 @require_http_methods(['PATCH'])
 def model_patch(request, model_id):
     """PATCH /api/models/:id — partial update (metadata or nested)."""
@@ -135,6 +414,7 @@ def model_patch(request, model_id):
     return JsonResponse(_model_to_payload(m))
 
 
+@csrf_exempt
 @require_http_methods(['DELETE'])
 def model_delete(request, model_id):
     """DELETE /api/models/:id."""
@@ -155,6 +435,7 @@ def model_param_names(request, model_id):
     return JsonResponse(m or {})
 
 
+@csrf_exempt
 @require_http_methods(['PUT'])
 def model_param_names_upsert(request, model_id):
     """PUT /api/models/:id/param-names — merge param names."""
@@ -171,6 +452,7 @@ def model_param_names_upsert(request, model_id):
 
 # ─── General ─────────────────────────────────────────────────────────────
 
+@csrf_exempt
 @require_http_methods(['PATCH'])
 def model_general(request, model_id):
     """PATCH /api/models/:id/general."""
@@ -178,300 +460,127 @@ def model_general(request, model_id):
     data = _parse_json(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    g = dict(m.general or {})
-    g.update(data)
-    m.general = g
-    m.save()
+    _update_general(m, data)
     return JsonResponse({})
 
 
 # ─── Labor ──────────────────────────────────────────────────────────────
 
+@csrf_exempt
 @require_http_methods(['POST'])
 def model_labor_create(request, model_id):
     m = get_object_or_404(RMCMModel, id=model_id)
     data = _parse_json(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    labor = list(m.labor or [])
-    labor.append(data)
-    m.labor = labor
-    m.save()
-    return JsonResponse({}, status=201)
+
+    owner = m.owner
+    if owner is None or not hasattr(owner, "profile") or not getattr(owner.profile, "organization_id", None):
+        return JsonResponse({'error': 'Owner organization not configured for model'}, status=400)
+
+    org = owner.profile.organization
+
+    # Allow frontend to provide a stable UUID id so that modelStore ids
+    # match rows in the relational Labor table.
+    labor_id = data.get('id')
+
+    labor_kwargs = {
+        'organization': org,
+        'name': data.get('name', '').upper(),
+        'count': data.get('count', 1),
+        'overtime_percent': data.get('overtime_pct', 0),
+        'unavailability_percent': data.get('unavail_pct', 0),
+        'department': data.get('dept_code') or None,
+        'setup_factor': data.get('setup_factor', 1),
+        'run_factor': data.get('run_factor', 1),
+        'variable_factor': data.get('var_factor', 1),
+        'prioritize': data.get('prioritize_use', False),
+        'lab1': data.get('lab1', 0),
+        'lab2': data.get('lab2', 0),
+        'lab3': data.get('lab3', 0),
+        'lab4': data.get('lab4', 0),
+        'notes': data.get('comments', ''),
+    }
+
+    if labor_id:
+        labor_kwargs['id'] = labor_id
+
+    labor = Labor.objects.create(**labor_kwargs)
+
+    return JsonResponse(
+        {
+            'id': str(labor.id),
+        },
+        status=201,
+    )
 
 
+@csrf_exempt
 @require_http_methods(['PATCH'])
 def model_labor_update(request, model_id, labor_id):
     m = get_object_or_404(RMCMModel, id=model_id)
     data = _parse_json(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    labor = list(m.labor or [])
-    for i, L in enumerate(labor):
-        if str(L.get('id')) == str(labor_id):
-            labor[i] = {**L, **data}
-            m.labor = labor
-            m.save()
-            return JsonResponse({})
-    return JsonResponse({'error': 'Labor not found'}, status=404)
+
+    labor = get_object_or_404(Labor, id=labor_id)
+
+    # Map incoming payload fields onto Labor model.
+    if 'name' in data:
+        labor.name = data['name']
+    if 'count' in data:
+        labor.count = data['count']
+    if 'overtime_pct' in data:
+        labor.overtime_percent = data['overtime_pct']
+    if 'unavail_pct' in data:
+        labor.unavailability_percent = data['unavail_pct']
+    if 'dept_code' in data:
+        labor.department = data['dept_code'] or None
+    if 'setup_factor' in data:
+        labor.setup_factor = data['setup_factor']
+    if 'run_factor' in data:
+        labor.run_factor = data['run_factor']
+    if 'var_factor' in data:
+        labor.variable_factor = data['var_factor']
+    if 'prioritize_use' in data:
+        labor.prioritize = data['prioritize_use']
+    for key, field in (('lab1', 'lab1'), ('lab2', 'lab2'), ('lab3', 'lab3'), ('lab4', 'lab4')):
+        if key in data:
+            setattr(labor, field, data[key])
+    if 'comments' in data:
+        labor.notes = data['comments']
+
+    labor.save()
+
+    return JsonResponse({})
 
 
+@csrf_exempt
 @require_http_methods(['DELETE'])
 def model_labor_delete(request, model_id, labor_id):
     m = get_object_or_404(RMCMModel, id=model_id)
-    labor = [L for L in (m.labor or []) if str(L.get('id')) != str(labor_id)]
-    m.labor = labor
-    m.equipment = [{**e, 'labor_group_id': '' if str(e.get('labor_group_id')) == str(labor_id) else e.get('labor_group_id')} for e in (m.equipment or [])]
-    m.save()
-    return JsonResponse({}, status=204)
-
-
-# ─── Equipment ───────────────────────────────────────────────────────────
-
-@require_http_methods(['POST'])
-def model_equipment_create(request, model_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    equipment = list(m.equipment or [])
-    equipment.append(data)
-    m.equipment = equipment
-    m.save()
-    return JsonResponse({}, status=201)
-
-
-@require_http_methods(['PATCH'])
-def model_equipment_update(request, model_id, equip_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    equipment = list(m.equipment or [])
-    for i, e in enumerate(equipment):
-        if str(e.get('id')) == str(equip_id):
-            equipment[i] = {**e, **data}
-            m.equipment = equipment
-            m.save()
-            return JsonResponse({})
-    return JsonResponse({'error': 'Equipment not found'}, status=404)
-
-
-@require_http_methods(['DELETE'])
-def model_equipment_delete(request, model_id, equip_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    m.equipment = [e for e in (m.equipment or []) if str(e.get('id')) != str(equip_id)]
-    m.operations = [{**o, 'equip_id': '' if str(o.get('equip_id')) == str(equip_id) else o.get('equip_id')} for o in (m.operations or [])]
-    m.save()
-    return JsonResponse({}, status=204)
-
-
-# ─── Products ───────────────────────────────────────────────────────────
-
-@require_http_methods(['POST'])
-def model_products_create(request, model_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    products = list(m.products or [])
-    products.append(data)
-    m.products = products
-    m.save()
-    return JsonResponse({}, status=201)
-
-
-@require_http_methods(['PATCH'])
-def model_products_update(request, model_id, product_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    products = list(m.products or [])
-    for i, p in enumerate(products):
-        if str(p.get('id')) == str(product_id):
-            products[i] = {**p, **data}
-            m.products = products
-            m.save()
-            return JsonResponse({})
-    return JsonResponse({'error': 'Product not found'}, status=404)
-
-
-@require_http_methods(['DELETE'])
-def model_products_delete(request, model_id, product_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    pid = str(product_id)
-    m.products = [p for p in (m.products or []) if str(p.get('id')) != pid]
-    m.operations = [o for o in (m.operations or []) if str(o.get('product_id')) != pid]
-    m.routing = [r for r in (m.routing or []) if str(r.get('product_id')) != pid]
-    m.ibom = [b for b in (m.ibom or []) if str(b.get('parent_product_id')) != pid and str(b.get('component_product_id')) != pid]
-    m.save()
-    return JsonResponse({}, status=204)
-
-
-@require_http_methods(['DELETE'])
-def model_products_clear_ops_routing(request, model_id, product_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    pid = str(product_id)
-    m.operations = [o for o in (m.operations or []) if str(o.get('product_id')) != pid]
-    m.routing = [r for r in (m.routing or []) if str(r.get('product_id')) != pid]
-    m.run_status = 'needs_recalc'
-    m.save()
-    return JsonResponse({}, status=204)
-
-
-# ─── Operations ──────────────────────────────────────────────────────────
-
-@require_http_methods(['POST'])
-def model_operations_create(request, model_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    operations = list(m.operations or [])
-    operations.append(data)
-    m.operations = operations
-    m.save()
-    return JsonResponse({}, status=201)
-
-
-@require_http_methods(['PATCH'])
-def model_operations_update(request, model_id, op_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    operations = list(m.operations or [])
-    for i, o in enumerate(operations):
-        if str(o.get('id')) == str(op_id):
-            operations[i] = {**o, **data}
-            m.operations = operations
-            m.save()
-            return JsonResponse({})
-    return JsonResponse({'error': 'Operation not found'}, status=404)
-
-
-@require_http_methods(['DELETE'])
-def model_operations_delete(request, model_id, op_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    op = next((o for o in (m.operations or []) if str(o.get('id')) == str(op_id)), None)
-    if not op:
+    # Soft-delete the Labor row if it exists; keep behaviour consistent with
+    # apps.labor.views.delete_labor.
+    try:
+        labor = Labor.objects.get(id=labor_id)
+    except Labor.DoesNotExist:
         return JsonResponse({}, status=204)
-    product_id = op.get('product_id')
-    op_name = op.get('op_name')
-    m.operations = [o for o in (m.operations or []) if str(o.get('id')) != str(op_id)]
-    m.routing = [r for r in (m.routing or []) if not (str(r.get('product_id')) == str(product_id) and r.get('from_op_name') == op_name)]
-    m.save()
+
+    from django.utils import timezone
+
+    labor.deleted_at = timezone.now()
+    labor.save()
+
+    # For now we do not attempt to automatically clear equipment assignments here,
+    # because those live in the dedicated equipment tables rather than RMCMModel.equipment.
     return JsonResponse({}, status=204)
 
 
-# ─── Routing ─────────────────────────────────────────────────────────────
-
-@require_http_methods(['POST'])
-def model_routing_create(request, model_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    routing = list(m.routing or [])
-    routing.append(data)
-    m.routing = routing
-    m.save()
-    return JsonResponse({}, status=201)
-
-
-@require_http_methods(['PUT'])
-def model_routing_set(request, model_id):
-    """PUT /api/models/:id/routing — replace routing for a product (body: productId, entries)."""
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    product_id = data.get('productId') or data.get('product_id')
-    entries = data.get('entries', [])
-    if product_id is None:
-        return JsonResponse({'error': 'productId required'}, status=400)
-    pid = str(product_id)
-    m.routing = [r for r in (m.routing or []) if str(r.get('product_id')) != pid] + entries
-    m.save()
-    return JsonResponse({})
-
-
-@require_http_methods(['PATCH'])
-def model_routing_update(request, model_id, route_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    routing = list(m.routing or [])
-    for i, r in enumerate(routing):
-        if str(r.get('id')) == str(route_id):
-            routing[i] = {**r, **data}
-            m.routing = routing
-            m.save()
-            return JsonResponse({})
-    return JsonResponse({'error': 'Routing not found'}, status=404)
-
-
-@require_http_methods(['DELETE'])
-def model_routing_delete(request, model_id, route_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    m.routing = [r for r in (m.routing or []) if str(r.get('id')) != str(route_id)]
-    m.save()
-    return JsonResponse({}, status=204)
-
-
-# ─── IBOM ───────────────────────────────────────────────────────────────
-
-@require_http_methods(['POST'])
-def model_ibom_create(request, model_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    ibom = list(m.ibom or [])
-    ibom.append(data)
-    m.ibom = ibom
-    m.save()
-    return JsonResponse({}, status=201)
-
-
-@require_http_methods(['PUT'])
-def model_ibom_set_for_parent(request, model_id, parent_id):
-    """PUT /api/models/:id/ibom/:parentId — set all IBOM entries for a parent product."""
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    entries = data if isinstance(data, list) else data.get('entries', [])
-    pid = str(parent_id)
-    m.ibom = [b for b in (m.ibom or []) if str(b.get('parent_product_id')) != pid] + entries
-    m.save()
-    return JsonResponse({})
-
-
-@require_http_methods(['PATCH'])
-def model_ibom_update(request, model_id, entry_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    data = _parse_json(request)
-    if data is None:
-        return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    ibom = list(m.ibom or [])
-    for i, b in enumerate(ibom):
-        if str(b.get('id')) == str(entry_id):
-            ibom[i] = {**b, **data}
-            m.ibom = ibom
-            m.save()
-            return JsonResponse({})
-    return JsonResponse({'error': 'IBOM entry not found'}, status=404)
-
-
-@require_http_methods(['DELETE'])
-def model_ibom_delete(request, model_id, entry_id):
-    m = get_object_or_404(RMCMModel, id=model_id)
-    m.ibom = [b for b in (m.ibom or []) if str(b.get('id')) != str(entry_id)]
-    m.save()
-    return JsonResponse({}, status=204)
+#
+# Equipment, products, operations, routing, and IBOM CRUD views are implemented
+# in their dedicated app view modules (apps.equipment.views, apps.products.views,
+# apps.operations.views, apps.routing.views, apps.ibom.views) and are wired to
+# the same URLs via apps.rmct.urls.
 
 
 # ─── Versions ────────────────────────────────────────────────────────────

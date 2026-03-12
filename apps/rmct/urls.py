@@ -1,5 +1,11 @@
 from django.urls import path
+
 from . import views
+from apps.equipment import views as equipment_views
+from apps.products import views as products_views
+from apps.operations import views as operations_views
+from apps.routing import views as routing_views
+from apps.ibom import views as ibom_views
 
 urlpatterns = [
     # Models
@@ -11,34 +17,29 @@ urlpatterns = [
     path('models/<uuid:model_id>/delete/', views.model_delete),
     path('models/<uuid:model_id>/param-names/', views.model_param_names),
     path('models/<uuid:model_id>/param-names/upsert/', views.model_param_names_upsert),
-    path('models/<uuid:model_id>/general/', views.model_general),
-    # Labor
-    path('models/<uuid:model_id>/labor/', views.model_labor_create),
-    path('models/<uuid:model_id>/labor/<str:labor_id>/', views.model_labor_update),
-    path('models/<uuid:model_id>/labor/<str:labor_id>/delete/', views.model_labor_delete),
-    # Equipment
-    path('models/<uuid:model_id>/equipment/', views.model_equipment_create),
-    path('models/<uuid:model_id>/equipment/<str:equip_id>/', views.model_equipment_update),
-    path('models/<uuid:model_id>/equipment/<str:equip_id>/delete/', views.model_equipment_delete),
-    # Products
-    path('models/<uuid:model_id>/products/', views.model_products_create),
-    path('models/<uuid:model_id>/products/<str:product_id>/', views.model_products_update),
-    path('models/<uuid:model_id>/products/<str:product_id>/delete/', views.model_products_delete),
-    path('models/<uuid:model_id>/products/<str:product_id>/operations-and-routing/', views.model_products_clear_ops_routing),
-    # Operations
-    path('models/<uuid:model_id>/operations/', views.model_operations_create),
-    path('models/<uuid:model_id>/operations/<str:op_id>/', views.model_operations_update),
-    path('models/<uuid:model_id>/operations/<str:op_id>/delete/', views.model_operations_delete),
-    # Routing
-    path('models/<uuid:model_id>/routing/', views.model_routing_create),
-    path('models/<uuid:model_id>/routing/set/', views.model_routing_set),
-    path('models/<uuid:model_id>/routing/<str:route_id>/', views.model_routing_update),
-    path('models/<uuid:model_id>/routing/<str:route_id>/delete/', views.model_routing_delete),
-    # IBOM
-    path('models/<uuid:model_id>/ibom/', views.model_ibom_create),
-    path('models/<uuid:model_id>/ibom/<str:parent_id>/', views.model_ibom_set_for_parent),
-    path('models/<uuid:model_id>/ibom/entry/<str:entry_id>/', views.model_ibom_update),
-    path('models/<uuid:model_id>/ibom/entry/<str:entry_id>/delete/', views.model_ibom_delete),
+    # Equipment (delegated to apps.equipment)
+    path('models/<uuid:model_id>/equipment/', equipment_views.model_equipment_create),
+    path('models/<uuid:model_id>/equipment/<str:equip_id>/', equipment_views.model_equipment_update),
+    path('models/<uuid:model_id>/equipment/<str:equip_id>/delete/', equipment_views.model_equipment_delete),
+    # Products (delegated to apps.products)
+    path('models/<uuid:model_id>/products/', products_views.model_products_create),
+    path('models/<uuid:model_id>/products/<str:product_id>/', products_views.model_products_update),
+    path('models/<uuid:model_id>/products/<str:product_id>/delete/', products_views.model_products_delete),
+    path('models/<uuid:model_id>/products/<str:product_id>/operations-and-routing/', products_views.model_products_clear_ops_routing),
+    # Operations (delegated to apps.operations)
+    path('models/<uuid:model_id>/operations/', operations_views.model_operations_create),
+    path('models/<uuid:model_id>/operations/<str:op_id>/', operations_views.model_operations_update),
+    path('models/<uuid:model_id>/operations/<str:op_id>/delete/', operations_views.model_operations_delete),
+    # Routing (delegated to apps.routing)
+    path('models/<uuid:model_id>/routing/', routing_views.model_routing_create),
+    path('models/<uuid:model_id>/routing/set/', routing_views.model_routing_set),
+    path('models/<uuid:model_id>/routing/<str:route_id>/', routing_views.model_routing_update),
+    path('models/<uuid:model_id>/routing/<str:route_id>/delete/', routing_views.model_routing_delete),
+    # IBOM (delegated to apps.ibom)
+    path('models/<uuid:model_id>/ibom/', ibom_views.model_ibom_create),
+    path('models/<uuid:model_id>/ibom/<str:parent_id>/', ibom_views.model_ibom_set_for_parent),
+    path('models/<uuid:model_id>/ibom/entry/<str:entry_id>/', ibom_views.model_ibom_update),
+    path('models/<uuid:model_id>/ibom/entry/<str:entry_id>/delete/', ibom_views.model_ibom_delete),
     # Versions
     path('models/<uuid:model_id>/versions/', views.version_list),
     path('models/<uuid:model_id>/versions/create/', views.version_create),
