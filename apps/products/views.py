@@ -37,6 +37,7 @@ def model_products_create(request, model_id):
     pid = data.get('id')
     prod_kwargs = {
         'organization': org,
+        'model': m,
         'name': data.get('name', '').upper(),
         'end_demand': data.get('demand', 0),
         'lot_size': data.get('lot_size', 1),
@@ -57,7 +58,48 @@ def model_products_create(request, model_id):
     if pid:
         prod_kwargs['id'] = pid
 
-    p = Product.objects.create(**prod_kwargs)
+    from django.db import IntegrityError
+
+    try:
+        p = Product.objects.create(**prod_kwargs)
+    except IntegrityError:
+        # A row with the same (organization, model, name) already exists.
+        # Look it up ignoring deleted_at so we can either return or "undelete" it.
+        existing = Product.objects.filter(
+            organization=org,
+            model=m,
+            name=prod_kwargs["name"],
+        ).first()
+        if not existing:
+            # If we cannot find the existing row, re-raise so it surfaces during debugging.
+            raise
+
+        # If the row was soft-deleted, revive it and update fields from the payload.
+        if existing.deleted_at is not None:
+            existing.deleted_at = None
+            existing.end_demand = prod_kwargs["end_demand"]
+            existing.lot_size = prod_kwargs["lot_size"]
+            existing.transfer_batch = prod_kwargs["transfer_batch"]
+            existing.department_area = prod_kwargs["department_area"]
+            existing.demand_factor = prod_kwargs["demand_factor"]
+            existing.lot_factor = prod_kwargs["lot_factor"]
+            existing.variability_factor = prod_kwargs["variability_factor"]
+            existing.make_to_stock = prod_kwargs["make_to_stock"]
+            existing.gather_transfer_batches = prod_kwargs["gather_transfer_batches"]
+            existing.prod1 = prod_kwargs["prod1"]
+            existing.prod2 = prod_kwargs["prod2"]
+            existing.prod3 = prod_kwargs["prod3"]
+            existing.prod4 = prod_kwargs["prod4"]
+            existing.comments = prod_kwargs["comments"]
+            existing.save()
+
+        return JsonResponse(
+            {
+                "id": str(existing.id),
+                "detail": "Product with this name already exists for this model and organization.",
+            },
+            status=200,
+        )
 
     return JsonResponse({'id': str(p.id)}, status=201)
 
@@ -65,12 +107,12 @@ def model_products_create(request, model_id):
 @csrf_exempt
 @require_http_methods(['PATCH'])
 def model_products_update(request, model_id, product_id):
-    get_object_or_404(RMCMModel, id=model_id)
+    m = get_object_or_404(RMCMModel, id=model_id)
     data = _parse_json(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    p = get_object_or_404(Product, id=product_id)
+    p = get_object_or_404(Product, id=product_id, model=m)
 
     if 'name' in data:
         p.name = data['name']
@@ -108,7 +150,7 @@ def model_products_update(request, model_id, product_id):
 def model_products_delete(request, model_id, product_id):
     m = get_object_or_404(RMCMModel, id=model_id)
     try:
-        p = Product.objects.get(id=product_id)
+        p = Product.objects.get(id=product_id, model=m)
     except Product.DoesNotExist:
         return JsonResponse({}, status=204)
 

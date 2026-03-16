@@ -234,6 +234,7 @@ def model_labor_create(request, model_id):
 
     labor_kwargs = {
         "organization": org,
+        "model": m,
         "name": data.get("name", "").upper(),
         "count": data.get("count", 1),
         "overtime_percent": data.get("overtime_pct", 0),
@@ -253,7 +254,47 @@ def model_labor_create(request, model_id):
     if labor_id:
         labor_kwargs["id"] = labor_id
 
-    labor = Labor.objects.create(**labor_kwargs)
+    from django.db import IntegrityError
+
+    try:
+        labor = Labor.objects.create(**labor_kwargs)
+    except IntegrityError:
+        # A row with the same (organization, model, name) already exists.
+        # Look it up ignoring deleted_at so we can either return or "undelete" it.
+        existing = Labor.objects.filter(
+            organization=org,
+            model=m,
+            name=labor_kwargs["name"],
+        ).first()
+        if not existing:
+            # If we cannot find the existing row, re-raise so it surfaces during debugging.
+            raise
+
+        # If the row was soft-deleted, revive it and update fields from the payload.
+        if existing.deleted_at is not None:
+            existing.deleted_at = None
+            existing.count = labor_kwargs["count"]
+            existing.overtime_percent = labor_kwargs["overtime_percent"]
+            existing.unavailability_percent = labor_kwargs["unavailability_percent"]
+            existing.department = labor_kwargs["department"]
+            existing.setup_factor = labor_kwargs["setup_factor"]
+            existing.run_factor = labor_kwargs["run_factor"]
+            existing.variable_factor = labor_kwargs["variable_factor"]
+            existing.prioritize = labor_kwargs["prioritize"]
+            existing.lab1 = labor_kwargs["lab1"]
+            existing.lab2 = labor_kwargs["lab2"]
+            existing.lab3 = labor_kwargs["lab3"]
+            existing.lab4 = labor_kwargs["lab4"]
+            existing.notes = labor_kwargs["notes"]
+            existing.save()
+
+        return JsonResponse(
+            {
+                "id": str(existing.id),
+                "detail": "Labor with this name already exists for this model and organization.",
+            },
+            status=200,
+        )
 
     return JsonResponse({"id": str(labor.id)}, status=201)
 
@@ -266,12 +307,12 @@ def model_labor_update(request, model_id, labor_id):
     if request.method != "PATCH":
         return JsonResponse({"error": "PATCH method required"}, status=405)
 
-    get_object_or_404(RMCMModel, id=model_id)
+    m = get_object_or_404(RMCMModel, id=model_id)
     data = _parse_json(request)
     if data is None:
         return JsonResponse({"error": "Invalid JSON"}, status=400)
 
-    labor = get_object_or_404(Labor, id=labor_id)
+    labor = get_object_or_404(Labor, id=labor_id, model=m)
 
     if "name" in data:
         labor.name = data["name"]
@@ -310,9 +351,9 @@ def model_labor_delete(request, model_id, labor_id):
     if request.method != "DELETE":
         return JsonResponse({"error": "DELETE method required"}, status=405)
 
-    get_object_or_404(RMCMModel, id=model_id)
+    m = get_object_or_404(RMCMModel, id=model_id)
     try:
-        labor = Labor.objects.get(id=labor_id)
+        labor = Labor.objects.get(id=labor_id, model=m)
     except Labor.DoesNotExist:
         return JsonResponse({}, status=204)
 

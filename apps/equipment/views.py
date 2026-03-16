@@ -35,6 +35,7 @@ def model_equipment_create(request, model_id):
     equip_id = data.get('id')
     equip_kwargs = {
         'organization': org,
+        'model': m,
         'name': data.get('name', '').upper(),
         'count': data.get('count', 1),
         'mttf_minutes': data.get('mttf', 0),
@@ -63,7 +64,52 @@ def model_equipment_create(request, model_id):
     if equip_id:
         equip_kwargs['id'] = equip_id
 
-    eq = EquipmentGroup.objects.create(**equip_kwargs)
+    from django.db import IntegrityError
+
+    try:
+        eq = EquipmentGroup.objects.create(**equip_kwargs)
+    except IntegrityError:
+        # A row with the same (organization, model, name) already exists.
+        # Look it up ignoring deleted_at so we can either return or "undelete" it.
+        existing = EquipmentGroup.objects.filter(
+            organization=org,
+            model=m,
+            name=equip_kwargs["name"],
+        ).first()
+        if not existing:
+            # If we cannot find the existing row, re-raise so it surfaces during debugging.
+            raise
+
+        # If the row was soft-deleted, revive it and update fields from the payload.
+        if existing.deleted_at is not None:
+            existing.deleted_at = None
+            existing.count = equip_kwargs["count"]
+            existing.mttf_minutes = equip_kwargs["mttf_minutes"]
+            existing.mttr_minutes = equip_kwargs["mttr_minutes"]
+            existing.overtime_percent = equip_kwargs["overtime_percent"]
+            existing.department_area = equip_kwargs["department_area"]
+            existing.out_of_area_equipment = equip_kwargs["out_of_area_equipment"]
+            existing.percent_time_unavailable = equip_kwargs["percent_time_unavailable"]
+            existing.setup_factor = equip_kwargs["setup_factor"]
+            existing.run_factor = equip_kwargs["run_factor"]
+            existing.variability_factor = equip_kwargs["variability_factor"]
+            existing.eq1 = equip_kwargs["eq1"]
+            existing.eq2 = equip_kwargs["eq2"]
+            existing.eq3 = equip_kwargs["eq3"]
+            existing.eq4 = equip_kwargs["eq4"]
+            existing.comments = equip_kwargs["comments"]
+            if "labor_group_id" in equip_kwargs:
+                existing.labor_group_id = equip_kwargs["labor_group_id"]
+            existing.equipment_type = equip_kwargs["equipment_type"]
+            existing.save()
+
+        return JsonResponse(
+            {
+                "id": str(existing.id),
+                "detail": "Equipment group with this name already exists for this model and organization.",
+            },
+            status=200,
+        )
 
     return JsonResponse({'id': str(eq.id)}, status=201)
 
@@ -71,12 +117,12 @@ def model_equipment_create(request, model_id):
 @csrf_exempt
 @require_http_methods(['PATCH'])
 def model_equipment_update(request, model_id, equip_id):
-    get_object_or_404(RMCMModel, id=model_id)
+    m = get_object_or_404(RMCMModel, id=model_id)
     data = _parse_json(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    eq = get_object_or_404(EquipmentGroup, id=equip_id)
+    eq = get_object_or_404(EquipmentGroup, id=equip_id, model=m)
 
     if 'name' in data:
         eq.name = data['name']
@@ -126,9 +172,9 @@ def model_equipment_update(request, model_id, equip_id):
 @csrf_exempt
 @require_http_methods(['DELETE'])
 def model_equipment_delete(request, model_id, equip_id):
-    get_object_or_404(RMCMModel, id=model_id)
+    m = get_object_or_404(RMCMModel, id=model_id)
     try:
-        eq = EquipmentGroup.objects.get(id=equip_id)
+        eq = EquipmentGroup.objects.get(id=equip_id, model=m)
     except EquipmentGroup.DoesNotExist:
         return JsonResponse({}, status=204)
 

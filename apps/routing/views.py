@@ -28,39 +28,12 @@ def _get_org_from_model(model):
 
 
 def _get_or_create_product_from_model(model, product_id):
-    existing = Product.objects.filter(id=product_id).first()
+    existing = Product.objects.filter(id=product_id, deleted_at__isnull=True).first()
     if existing:
         return existing
 
-    snapshot_prod = next(
-        (p for p in (model.products or []) if str(p.get("id")) == str(product_id)),
-        None,
-    )
-
-    if not snapshot_prod:
-        raise Product.DoesNotExist(f"Product {product_id} not found on model")
-
-    org = _get_org_from_model(model)
-
-    return Product.objects.create(
-        id=snapshot_prod.get("id"),
-        organization=org,
-        name=snapshot_prod.get("name", "").upper(),
-        end_demand=snapshot_prod.get("demand", 0),
-        lot_size=snapshot_prod.get("lot_size", 1),
-        transfer_batch=snapshot_prod.get("tbatch_size", -1),
-        department_area=snapshot_prod.get("dept_code") or None,
-        demand_factor=snapshot_prod.get("demand_factor", 1),
-        lot_factor=snapshot_prod.get("lot_factor", 1),
-        variability_factor=snapshot_prod.get("var_factor", 1),
-        make_to_stock=snapshot_prod.get("make_to_stock", False),
-        gather_transfer_batches=snapshot_prod.get("gather_tbatches", False),
-        prod1=snapshot_prod.get("prod1", 0),
-        prod2=snapshot_prod.get("prod2", 0),
-        prod3=snapshot_prod.get("prod3", 0),
-        prod4=snapshot_prod.get("prod4", 0),
-        comments=snapshot_prod.get("comments", ""),
-    )
+    # Do not fall back to legacy JSON snapshot on RMCMModel; require a real Product row.
+    raise Product.DoesNotExist(f"Product {product_id} not found")
 
 
 def _get_or_create_operation_from_model(model, product, op_name):
@@ -73,80 +46,26 @@ def _get_or_create_operation_from_model(model, product, op_name):
     if existing:
         return existing
 
-    snapshot_op = next(
-        (
-            o
-            for o in (model.operations or [])
-            if str(o.get("product_id")) == str(product.id)
-            and o.get("op_name") == op_name
-        ),
-        None,
+    org = _get_org_from_model(model)
+    from django.db.models import Max
+
+    max_num = (
+        Operation.objects.filter(product=product)
+        .aggregate(Max("op_number"))
+        .get("op_number__max")
+        or 0
     )
 
-    org = _get_org_from_model(model)
-
-    if not snapshot_op:
-
-        if op_name in ("STOCK", "SCRAP", "DOCK"):
-
-            from django.db.models import Max
-
-            max_num = (
-                Operation.objects.filter(product=product)
-                .aggregate(Max("op_number"))
-                .get("op_number__max")
-                or 0
-            )
-
-            return Operation.objects.create(
-                organization=org,
-                product=product,
-                name=op_name,
-                op_number=max_num + 10,
-                percent_assign=100,
-                equipment_setup_per_lot=0,
-                equipment_run_per_piece=0,
-                labor_setup_per_lot=0,
-                labor_run_per_piece=0,
-            )
-
-        raise Operation.DoesNotExist(
-            f"Operation {op_name} not found for product {product.id}"
-        )
-
-    equip_id = snapshot_op.get("equip_id")
-    equipment_group = None
-
-    if equip_id:
-        equipment_group = (
-            Operation._meta.get_field("equipment_group")
-            .remote_field.model.objects.filter(id=equip_id)
-            .first()
-        )
-
-    labor_group = None
-    labor_group_id = snapshot_op.get("labor_group_id")
-
-    if labor_group_id:
-        labor_group = (
-            Operation._meta.get_field("labor")
-            .remote_field.model.objects.filter(id=labor_group_id)
-            .first()
-        )
-
     return Operation.objects.create(
-        id=snapshot_op.get("id"),
         organization=org,
         product=product,
-        op_number=snapshot_op.get("op_number", 1),
-        name=snapshot_op.get("op_name", ""),
-        equipment_group=equipment_group,
-        labor=labor_group,
-        percent_assign=snapshot_op.get("pct_assigned", 100),
-        equipment_setup_per_lot=snapshot_op.get("equip_setup_lot", 0),
-        equipment_run_per_piece=snapshot_op.get("equip_run_piece", 0),
-        labor_setup_per_lot=snapshot_op.get("labor_setup_lot", 0),
-        labor_run_per_piece=snapshot_op.get("labor_run_piece", 0),
+        name=op_name,
+        op_number=max_num + 10,
+        percent_assign=100,
+        equipment_setup_per_lot=0,
+        equipment_run_per_piece=0,
+        labor_setup_per_lot=0,
+        labor_run_per_piece=0,
     )
 
 
@@ -165,7 +84,7 @@ def model_routing_create(request, model_id):
         return JsonResponse(
             {"error": "Owner organization not configured"}, status=400
         )
-
+    print(data)
     product_id = data.get("product_id")
     from_op_name = data.get("from_op_name")
     to_op_name = data.get("to_op_name")
@@ -295,7 +214,6 @@ def model_routing_update(request, model_id, route_id):
         Routing,
         id=route_id,
         organization=org,
-        deleted_at__isnull=True,
     )
 
     # Update probability (% routed)
@@ -322,6 +240,8 @@ def model_routing_update(request, model_id, route_id):
 
         routing.to_operation = to_op
 
+    # Ensure a previously soft-deleted route is restored when updated.
+    routing.deleted_at = None
     routing.save()
 
     return JsonResponse({})

@@ -7,6 +7,17 @@ class Labor(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
+    # Optional link to an RMCT manufacturing model so that
+    # labor rows can be scoped per RMCMModel instead of being
+    # shared across all models in an organization.
+    model = models.ForeignKey(
+        "rmct.RMCMModel",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="labors",
+    )
+
     organization = models.ForeignKey(
         Organization,
         on_delete=models.CASCADE,
@@ -51,14 +62,15 @@ class Labor(models.Model):
 
         constraints = [
             models.UniqueConstraint(
-                fields=["organization", "name"],
-                name="unique_labor_name_per_org"
+                fields=["organization", "model", "name"],
+                name="unique_labor_name_per_org_model",
             )
         ]
 
         indexes = [
             models.Index(fields=["organization", "department"]),
             models.Index(fields=["organization", "created_at"]),
+            models.Index(fields=["model", "created_at"]),
         ]
 
     def __str__(self):

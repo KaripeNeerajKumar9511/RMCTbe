@@ -16,10 +16,21 @@ Including another URLconf
 """
 from django.contrib import admin
 from django.urls import path, include
+from apps.simulations import views as simulation_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
     path("", include("apps.users.urls")),
     path("", include("apps.labor.urls")),  # /api/labor, /api/labor/add, etc.
     path("api/", include("apps.rmct.urls")),
+    path("api/", include("apps.equipment.urls")),
+    path("api/", include("apps.products.urls")),
+    path("api/", include("apps.operations.urls")),
+    path("api/", include("apps.routing.urls")),
+    path("api/", include("apps.ibom.urls")),
+    path("api/organizations/", include("apps.organizations.urls")),
+    # Lightweight simulation endpoint that uses the formula helpers in
+    # apps.simulations.views. Safe to ignore if you prefer the
+    # existing frontend-only calculation engine.
+    path("api/simulations/rows", simulation_views.simulate_rows, name="simulate-rows"),
 ]
