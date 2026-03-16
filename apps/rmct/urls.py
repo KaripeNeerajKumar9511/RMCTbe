@@ -7,6 +7,7 @@ urlpatterns = [
     path('models/', views.model_list_or_create),  # GET list, POST create (body has id)
     path('models/seed-demo/', views.seed_demo),
     path('models/<uuid:model_id>/', views.model_detail),  # GET one
+    path('models/<uuid:model_id>/general/', views.model_general),  # PATCH general settings
     path('models/<uuid:model_id>/save/', views.model_save),  # PUT full model
     path('models/<uuid:model_id>/patch/', views.model_patch),
     path('models/<uuid:model_id>/delete/', views.model_delete),

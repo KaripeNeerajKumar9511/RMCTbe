@@ -61,6 +61,43 @@ def _serialize_general(m: RMCMModel) -> dict:
     }
 
 
+def _update_general(m: RMCMModel, data: dict) -> None:
+    """
+    Create or update the GeneralData row for a model from a partial payload.
+
+    Mirrors the shape of `model.general` used on the frontend. Any fields
+    present in `data` are applied; others are left unchanged/defaulted.
+    """
+    # Get or create the OneToOne GeneralData row for this model.
+    gd, _created = GeneralData.objects.get_or_create(model=m)
+
+    # Simple direct fields
+    mappings = {
+        "model_title": "model_title",
+        "author": "author",
+        "comments": "comments",
+        "ops_time_unit": "ops_time_unit",
+        "mct_time_unit": "mct_time_unit",
+        "prod_period_unit": "prod_period_unit",
+        "conv1": "conv1",
+        "conv2": "conv2",
+        "util_limit": "util_limit",
+        "var_equip": "var_equip",
+        "var_labor": "var_labor",
+        "var_prod": "var_prod",
+        "gen1": "gen1",
+        "gen2": "gen2",
+        "gen3": "gen3",
+        "gen4": "gen4",
+    }
+
+    for payload_key, field_name in mappings.items():
+        if payload_key in data:
+            setattr(gd, field_name, data[payload_key])
+
+    gd.save()
+
+
 def _labor_for_model(m: RMCMModel):
     """
     Build LaborGroup[] payload for a model from the dedicated Labor table.
