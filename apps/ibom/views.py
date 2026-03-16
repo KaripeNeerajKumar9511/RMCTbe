@@ -78,16 +78,33 @@ def model_ibom_set_for_parent(request, model_id, parent_id):
     now = timezone.now()
     BOM.objects.filter(parent_product=parent, deleted_at__isnull=True).update(deleted_at=now)
 
+    from django.db import IntegrityError
+
     for entry in entries:
         component_id = entry.get('component_product_id')
         units = entry.get('units_per_assy', 1)
         component = get_object_or_404(Product, id=component_id)
-        BOM.objects.create(
-            organization=org,
-            parent_product=parent,
-            component_product=component,
-            quantity_per_assembly=units,
-        )
+        try:
+            BOM.objects.create(
+                organization=org,
+                parent_product=parent,
+                component_product=component,
+                quantity_per_assembly=units,
+            )
+        except IntegrityError:
+            # A row with the same (parent_product, component_product) already exists.
+            existing = BOM.objects.filter(
+                parent_product=parent,
+                component_product=component,
+            ).first()
+            if not existing:
+                # If we cannot find the existing row, re-raise so it surfaces during debugging.
+                raise
+            # If the row was soft-deleted, revive it and update the quantity.
+            if existing.deleted_at is not None:
+                existing.deleted_at = None
+            existing.quantity_per_assembly = units
+            existing.save()
 
     return JsonResponse({})
 

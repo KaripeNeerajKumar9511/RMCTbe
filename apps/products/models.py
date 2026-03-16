@@ -7,6 +7,17 @@ class Product(models.Model):
 
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
 
+    # Optional link to an RMCT manufacturing model so that
+    # products are scoped per RMCMModel rather than globally
+    # per organization.
+    model = models.ForeignKey(
+        "rmct.RMCMModel",
+        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        related_name="products",
+    )
+
     organization = models.ForeignKey(
         Organization,
         on_delete=models.CASCADE,
@@ -57,14 +68,15 @@ class Product(models.Model):
 
         constraints = [
             models.UniqueConstraint(
-                fields=["organization", "name"],
-                name="unique_product_per_org"
+                fields=["organization", "model", "name"],
+                name="unique_product_per_org_model",
             )
         ]
 
         indexes = [
             models.Index(fields=["organization", "department_area"]),
             models.Index(fields=["organization", "created_at"]),
+            models.Index(fields=["model", "created_at"]),
         ]
 
     def __str__(self):

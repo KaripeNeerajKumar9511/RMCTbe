@@ -38,7 +38,8 @@ def _serialize_general(m: RMCMModel) -> dict:
     try:
         gd = m.general_settings  # OneToOneField related_name on GeneralData
     except GeneralData.DoesNotExist:
-        return m.general or {}
+        # No relational row yet; do not fall back to legacy JSON on RMCMModel.
+        return {}
 
     return {
         'model_title': gd.model_title or '',
@@ -60,6 +61,43 @@ def _serialize_general(m: RMCMModel) -> dict:
     }
 
 
+def _update_general(m: RMCMModel, data: dict) -> None:
+    """
+    Create or update the GeneralData row for a model from a partial payload.
+
+    Mirrors the shape of `model.general` used on the frontend. Any fields
+    present in `data` are applied; others are left unchanged/defaulted.
+    """
+    # Get or create the OneToOne GeneralData row for this model.
+    gd, _created = GeneralData.objects.get_or_create(model=m)
+
+    # Simple direct fields
+    mappings = {
+        "model_title": "model_title",
+        "author": "author",
+        "comments": "comments",
+        "ops_time_unit": "ops_time_unit",
+        "mct_time_unit": "mct_time_unit",
+        "prod_period_unit": "prod_period_unit",
+        "conv1": "conv1",
+        "conv2": "conv2",
+        "util_limit": "util_limit",
+        "var_equip": "var_equip",
+        "var_labor": "var_labor",
+        "var_prod": "var_prod",
+        "gen1": "gen1",
+        "gen2": "gen2",
+        "gen3": "gen3",
+        "gen4": "gen4",
+    }
+
+    for payload_key, field_name in mappings.items():
+        if payload_key in data:
+            setattr(gd, field_name, data[payload_key])
+
+    gd.save()
+
+
 def _labor_for_model(m: RMCMModel):
     """
     Build LaborGroup[] payload for a model from the dedicated Labor table.
@@ -67,17 +105,8 @@ def _labor_for_model(m: RMCMModel):
     Uses the owner's organization (via UserProfile) when available.
     Falls back to the legacy JSON field if no organization is found.
     """
-    owner = m.owner
-    org = None
-    if owner is not None and hasattr(owner, "profile"):
-        org = getattr(owner.profile, "organization", None)
-
-    if org is None:
-        # No organization context; use legacy JSON field.
-        return m.labor or []
-
     labors = Labor.objects.filter(
-        organization=org,
+        model=m,
         deleted_at__isnull=True,
     ).order_by("created_at")
 
@@ -110,16 +139,8 @@ def _equipment_for_model(m: RMCMModel):
     Uses the owner's organization when available, otherwise falls back to the
     legacy JSON field on RMCMModel.
     """
-    owner = m.owner
-    org = None
-    if owner is not None and hasattr(owner, "profile"):
-        org = getattr(owner.profile, "organization", None)
-
-    if org is None:
-        return m.equipment or []
-
     equipment_qs = EquipmentGroup.objects.filter(
-        organization=org,
+        model=m,
         deleted_at__isnull=True,
     ).order_by("created_at")
 
@@ -153,16 +174,8 @@ def _products_for_model(m: RMCMModel):
     """
     Build Product[] payload for a model from the dedicated products table.
     """
-    owner = m.owner
-    org = None
-    if owner is not None and hasattr(owner, "profile"):
-        org = getattr(owner.profile, "organization", None)
-
-    if org is None:
-        return m.products or []
-
     products_qs = Product.objects.filter(
-        organization=org,
+        model=m,
         deleted_at__isnull=True,
     ).order_by("created_at")
 
@@ -198,16 +211,8 @@ def _operations_for_model(m: RMCMModel):
     do not exist on the model are surfaced as zeros to keep the frontend type
     happy.
     """
-    owner = m.owner
-    org = None
-    if owner is not None and hasattr(owner, "profile"):
-        org = getattr(owner.profile, "organization", None)
-
-    if org is None:
-        return m.operations or []
-
     ops_qs = Operation.objects.filter(
-        organization=org,
+        product__model=m,
         deleted_at__isnull=True,
     ).select_related("product", "equipment_group", "labor").order_by("product__created_at", "op_number")
 
@@ -244,16 +249,8 @@ def _routing_for_model(m: RMCMModel):
     """
     Build RoutingEntry[] payload for a model from the dedicated routing table.
     """
-    owner = m.owner
-    org = None
-    if owner is not None and hasattr(owner, "profile"):
-        org = getattr(owner.profile, "organization", None)
-
-    if org is None:
-        return m.routing or []
-
     routing_qs = Routing.objects.filter(
-        organization=org,
+        product__model=m,
         deleted_at__isnull=True,
     ).select_related("product", "from_operation", "to_operation").order_by("created_at")
 
@@ -273,16 +270,8 @@ def _ibom_for_model(m: RMCMModel):
     """
     Build IBOMEntry[] payload for a model from the dedicated BOM table.
     """
-    owner = m.owner
-    org = None
-    if owner is not None and hasattr(owner, "profile"):
-        org = getattr(owner.profile, "organization", None)
-
-    if org is None:
-        return m.ibom or []
-
     bom_qs = BOM.objects.filter(
-        organization=org,
+        parent_product__model=m,
         deleted_at__isnull=True,
     ).order_by("created_at")
 
@@ -299,6 +288,15 @@ def _ibom_for_model(m: RMCMModel):
 
 def _model_to_payload(m: RMCMModel) -> dict:
     """Serialize RMCMModel to frontend Model shape."""
+    last_run_value = m.last_run_at
+    if last_run_value is None:
+        last_run_serialized = None
+    elif hasattr(last_run_value, "isoformat"):
+        last_run_serialized = last_run_value.isoformat()
+    else:
+        # Gracefully handle unexpected string/other types persisted in last_run_at
+        last_run_serialized = str(last_run_value)
+
     return {
         'id': str(m.id),
         'name': m.name,
@@ -306,13 +304,14 @@ def _model_to_payload(m: RMCMModel) -> dict:
         'tags': m.tags or [],
         'created_at': m.created_at.isoformat() if m.created_at else '',
         'updated_at': m.updated_at.isoformat() if m.updated_at else '',
-        'last_run_at': m.last_run_at.isoformat() if m.last_run_at else None,
+        'last_run_at': last_run_serialized,
         'run_status': m.run_status or 'never_run',
         'is_archived': bool(m.is_archived),
         'is_demo': bool(m.is_demo),
         'is_starred': bool(m.is_starred),
         'general': _serialize_general(m),
-        'param_names': m.param_names or {},
+        # Param names are no longer stored on RMCMModel; return an empty mapping.
+        'param_names': {},
         'labor': _labor_for_model(m),
         'equipment': _equipment_for_model(m),
         'products': _products_for_model(m),
@@ -383,14 +382,6 @@ def model_save(request, model_id=None):
         'is_archived': data.get('is_archived', False),
         'is_demo': data.get('is_demo', False),
         'is_starred': data.get('is_starred', False),
-        'general': data.get('general', {}),
-        'param_names': data.get('param_names', {}),
-        'labor': data.get('labor', []),
-        'equipment': data.get('equipment', []),
-        'products': data.get('products', []),
-        'operations': data.get('operations', []),
-        'routing': data.get('routing', []),
-        'ibom': data.get('ibom', []),
     }
     if request.user.is_authenticated:
         defaults['owner'] = request.user
@@ -406,8 +397,8 @@ def model_patch(request, model_id):
     data = _parse_json(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    for key in ('name', 'description', 'tags', 'run_status', 'last_run_at', 'is_archived', 'is_demo', 'is_starred',
-                'general', 'param_names', 'labor', 'equipment', 'products', 'operations', 'routing', 'ibom'):
+    for key in ('name', 'description', 'tags', 'run_status', 'last_run_at',
+                'is_archived', 'is_demo', 'is_starred'):
         if key in data:
             setattr(m, key, data[key])
     m.save()
@@ -429,24 +420,18 @@ def model_delete(request, model_id):
 @require_http_methods(['GET'])
 def model_param_names(request, model_id):
     """GET /api/models/:id/param-names."""
-    m = RMCMModel.objects.filter(id=model_id).values_list('param_names', flat=True).first()
-    if m is None:
-        return JsonResponse(None, safe=False)
-    return JsonResponse(m or {})
+    # Param names are no longer stored on RMCMModel; always return an empty mapping.
+    return JsonResponse({})
 
 
 @csrf_exempt
 @require_http_methods(['PUT'])
 def model_param_names_upsert(request, model_id):
     """PUT /api/models/:id/param-names — merge param names."""
-    m = get_object_or_404(RMCMModel, id=model_id)
     data = _parse_json(request)
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
-    pn = dict(m.param_names or {})
-    pn.update(data)
-    m.param_names = pn
-    m.save()
+    # Endpoint is now a no-op; accept payload but do not persist on RMCMModel.
     return JsonResponse({})
 
 

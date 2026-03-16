@@ -50,7 +50,7 @@ class Routing(models.Model):
 
         constraints = [
             models.UniqueConstraint(
-                fields=["from_operation", "to_operation"],
+                fields=["product", "from_operation", "to_operation"],
                 name="unique_operation_path"
             )
         ]

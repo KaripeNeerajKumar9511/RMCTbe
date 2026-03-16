@@ -4,6 +4,7 @@ from django.http import JsonResponse
 from django.shortcuts import get_object_or_404
 from django.views.decorators.csrf import csrf_exempt
 from django.views.decorators.http import require_http_methods
+from django.db import IntegrityError
 
 from apps.rmct.models import RMCMModel
 from apps.equipment.models import EquipmentGroup
@@ -38,7 +39,7 @@ def model_operations_create(request, model_id):
     op_id = data.get('id')
     product_id = data.get('product_id')
     product = get_object_or_404(Product, id=product_id)
-
+    print(data)
     equip_id = data.get('equip_id')
     equipment_group = None
     if equip_id:
@@ -65,7 +66,41 @@ def model_operations_create(request, model_id):
     if op_id:
         operation_kwargs['id'] = op_id
 
-    op = Operation.objects.create(**operation_kwargs)
+    try:
+        op = Operation.objects.create(**operation_kwargs)
+    except IntegrityError:
+        # A row with the same (product, op_number) already exists.
+        # Look it up (including soft-deleted rows) so we can either return or "undelete" it.
+        existing = Operation.objects.filter(
+            organization=org,
+            product=product,
+            op_number=operation_kwargs["op_number"],
+        ).first()
+        if not existing:
+            # If we cannot find the existing row, re-raise so it surfaces during debugging.
+            raise
+
+        # If the row was soft-deleted, revive it and update fields from the payload.
+        if existing.deleted_at is not None:
+            existing.deleted_at = None
+            existing.name = operation_kwargs["name"]
+            existing.equipment_group = operation_kwargs.get("equipment_group")
+            existing.labor = operation_kwargs.get("labor")
+            existing.percent_assign = operation_kwargs["percent_assign"]
+            existing.equipment_setup_per_lot = operation_kwargs["equipment_setup_per_lot"]
+            existing.equipment_run_per_piece = operation_kwargs["equipment_run_per_piece"]
+            existing.labor_setup_per_lot = operation_kwargs["labor_setup_per_lot"]
+            existing.labor_run_per_piece = operation_kwargs["labor_run_per_piece"]
+            existing.comments = operation_kwargs["comments"]
+            existing.save()
+
+        return JsonResponse(
+            {
+                "id": str(existing.id),
+                "detail": "Operation with this number already exists for this product.",
+            },
+            status=200,
+        )
 
     return JsonResponse({'id': str(op.id)}, status=201)
 
@@ -78,7 +113,16 @@ def model_operations_update(request, model_id, op_id):
     if data is None:
         return JsonResponse({'error': 'Invalid JSON'}, status=400)
 
-    op = get_object_or_404(Operation, id=op_id)
+    # Primary lookup by id; if that fails (e.g. client still has a stale id),
+    # fall back to the unique (product, op_number) pair when available.
+    op = Operation.objects.filter(id=op_id).first()
+    if op is None:
+        product_id = data.get('product_id')
+        op_number = data.get('op_number')
+        if product_id is not None and op_number is not None:
+            op = Operation.objects.filter(product_id=product_id, op_number=op_number).first()
+    if op is None:
+        return JsonResponse({'error': 'Operation not found'}, status=404)
 
     if 'op_name' in data:
         op.name = data['op_name']
@@ -107,7 +151,25 @@ def model_operations_update(request, model_id, op_id):
         else:
             op.labor = None
 
-    op.save()
+    try:
+        op.save()
+    except IntegrityError:
+        # Enforce unique_operation_per_product gracefully:
+        # if another row already uses (product, op_number), surface a clear 400 error.
+        existing = Operation.objects.filter(
+            product=op.product,
+            op_number=op.op_number,
+        ).exclude(id=op.id).first()
+        if existing:
+            return JsonResponse(
+                {
+                    "error": "duplicate_op_number",
+                    "detail": "Another operation already uses this Op # for this product.",
+                    "existing_id": str(existing.id),
+                },
+                status=400,
+            )
+        raise
 
     return JsonResponse({})
 

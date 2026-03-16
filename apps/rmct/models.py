@@ -23,14 +23,14 @@ class RMCMModel(models.Model):
     is_demo = models.BooleanField(default=False)
     is_starred = models.BooleanField(default=False)
     # Full nested data (mirrors frontend Model type)
-    general = models.JSONField(default=dict)
-    param_names = models.JSONField(default=dict)
-    labor = models.JSONField(default=list)
-    equipment = models.JSONField(default=list)
-    products = models.JSONField(default=list)
-    operations = models.JSONField(default=list)
-    routing = models.JSONField(default=list)
-    ibom = models.JSONField(default=list)
+    # general = models.JSONField(default=dict)
+    # param_names = models.JSONField(default=dict)
+    # labor = models.JSONField(default=list)
+    # equipment = models.JSONField(default=list)
+    # products = models.JSONField(default=list)
+    # operations = models.JSONField(default=list)
+    # routing = models.JSONField(default=list)
+    # ibom = models.JSONField(default=list)
 
     class Meta:
         ordering = ['-updated_at']
