@@ -154,6 +154,9 @@ SESSION_ENGINE = "django.contrib.sessions.backends.db"
 SESSION_COOKIE_HTTPONLY = True
 SESSION_COOKIE_SAMESITE = "Lax"
 SESSION_COOKIE_AGE = 1209600  # 2 weeks
+# Production: if frontend is on gotrooba.ai and API on rmctapi.gotrooba.ai,
+# set SESSION_COOKIE_DOMAIN = ".gotrooba.ai" so the cookie is sent to both.
+# SESSION_COOKIE_DOMAIN = ".gotrooba.ai"  # optional, for shared subdomain auth
 
 # CSRF cookie: readable by JS so we can send X-CSRFToken header
 CSRF_COOKIE_HTTPONLY = False
