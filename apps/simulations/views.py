@@ -150,6 +150,32 @@ def calculate_product_row(payload: Dict[str, Any]) -> Dict[str, Any]:
 
 @csrf_exempt
 @require_http_methods(["POST"])
+def full_calculate_view(request):
+    """
+    POST /api/simulations/full-calculate
+    Body: { "model": { ... }, "scenario": { ... } | null }
+    Returns: { "results": { equipment, labor, products, warnings, errors, overLimitResources, calculatedAt } }
+    """
+    from .full_calculate import full_calculate as do_full_calculate
+
+    data = _parse_json(request)
+    if data is None:
+        return JsonResponse({"error": "Invalid JSON"}, status=400)
+
+    model = data.get("model")
+    scenario = data.get("scenario")
+    if not model:
+        return JsonResponse({"error": "Missing 'model' in body"}, status=400)
+
+    try:
+        results = do_full_calculate(model, scenario)
+        return JsonResponse({"results": results})
+    except Exception as e:
+        return JsonResponse({"error": str(e)}, status=500)
+
+
+@csrf_exempt
+@require_http_methods(["POST"])
 def simulate_rows(request):
     """
     Optional API endpoint:

@@ -17,6 +17,7 @@ Including another URLconf
 from django.contrib import admin
 from django.urls import path, include
 from apps.simulations import views as simulation_views
+from apps.simulations import latest_views as simulation_latest_views
 
 urlpatterns = [
     path("admin/", admin.site.urls),
@@ -33,4 +34,5 @@ urlpatterns = [
     # apps.simulations.views. Safe to ignore if you prefer the
     # existing frontend-only calculation engine.
     path("api/simulations/rows", simulation_views.simulate_rows, name="simulate-rows"),
+    path("api/simulations/full-calculate", simulation_latest_views.full_calculate_view, name="full-calculate"),
 ]
